@@ -1,38 +1,71 @@
 from glob import glob
-from os import system
+import os
 import pandas as pd
+import subprocess
+import shutil
 
 try:
-    system("mkdir temp")
+    os.mkdir('temp')
 except:
-    "temp folder already present"
-bams = glob("*.bam")
-print("Located BAM files:\n" +"\n".join(bams) + "\n\nProcessing...")
+    'temp folder already present'
+bams = glob('**/*.bam', recursive = True)
+print('Located BAM files:\n' + '\n'.join(bams) + '\n')
 
-users = [bam[:-4] for bam in bams]
-open("temp/samples.txt", 'w').write('\n'.join(users))
+samples = [bam[:-4] for bam in bams]
+open('temp/samples.txt', 'w').write('\n'.join(samples))
+
+def getSampleName(name):
+    sample = name[:-4]
+    if '/' in sample:
+        sample = sample.split('/')[-1]
+    if '\\' in sample:
+        sample = sample.split('\\')[-1]
+    return sample
+
 def depthCounter(chromosome):
+    print('Processing chromosome ' + chromosome + '...')
     try:
         for bam in bams:
-            system("samtools depth -a -r chr" + chromosome + ' ' + bam + " | cut -f2,3 | awk '$1%50==0' | head -n -1 | sort -n -s -k1,1 > temp/" + bam[:-4] + "_chr" + chromosome + ".counted")
-        df = pd.read_csv("temp/" + bams[0][:-4] + "_chr" + chromosome + ".counted", sep = '\t', header = None)
-        df.columns = ['Coordinate', bams[0][:-4]]
+            sample = getSampleName(bam)
+            if '\\' in bam:
+                bam = bam.replace('\\','/')
+            chrAnnotation = 'samtools view ' + bam + ' | head | cut -f3 | uniq'
+            if os.name == 'nt':
+                head = subprocess.check_output(['wsl'] + chrAnnotation.split(' '))
+                if 'chr' in str(head).lower():
+                    command = 'samtools depth -a -r chr' + chromosome + ' ' + bam + " | cut -f2,3 | awk '$1%50==0' | head -n -1 | sort -n -s -k1,1 > temp/" + sample + '_chr' + chromosome + '.counted'
+                else:
+                    command = 'samtools depth -a -r ' + chromosome + ' ' + bam + " | cut -f2,3 | awk '$1%50==0' | head -n -1 | sort -n -s -k1,1 > temp/" + sample + '_chr' + chromosome + '.counted'
+                subprocess.check_call(['wsl'] + command.split(' '))
+            else:
+                os.system(chrAnnotation + ' > temp.txt')
+                head = open('temp.txt', 'r').read()
+                os.remove('temp.txt')
+                if 'chr' in str(head).lower():
+                    command = 'samtools depth -a -r chr' + chromosome + ' ' + bam + " | cut -f2,3 | awk '$1%50==0' | head -n -1 | sort -n -s -k1,1 > temp/" + sample + '_chr' + chromosome + '.counted'
+                else:
+                    command = 'samtools depth -a -r ' + chromosome + ' ' + bam + " | cut -f2,3 | awk '$1%50==0' | head -n -1 | sort -n -s -k1,1 > temp/" + sample + '_chr' + chromosome + '.counted'
+                os.system(command)
+            sample = getSampleName(bams[0])
+            df = pd.read_csv('temp/' + sample + '_chr' + chromosome + '.counted', sep = '\t', header = None)
+        df.columns = ['Coordinate', sample ]
         for bam in bams[1:]:
-            df2 = pd.read_csv("temp/" + bam[:-4] + "_chr" + chromosome + ".counted", sep = '\t', header = None)
-            df2.columns = ['Coordinate', bam[:-4]]
-            df = df.merge(df2, on='Coordinate')
+            sample = getSampleName(bam)
+            df2 = pd.read_csv('temp/' + sample  + '_chr' + chromosome + '.counted', sep = '\t', header = None)
+            df2.columns = ['Coordinate', sample ]
+            df = df.merge(df2, on = 'Coordinate')
         df['coverages'] = df.apply(lambda x : x.values[1:], axis = 1) 
         df = df[df['coverages'].apply(lambda x : (sum(x) != 0) and (0 in x) and (max(x) >= 5))]
         del df['coverages']
-        df.to_csv("temp/chr" + chromosome + ".coverage", sep = '\t', index = False)
-        system("rm -f temp/*hr" + chromosome + ".*ounted")
+        df.to_csv('temp/chr' + chromosome + '.coverage', sep = '\t', index = False)
+        for coverage_file in glob('temp/*hr' + chromosome + '.*ounted'):
+            os.remove(coverage_file)
     except:
-        print("Error occured while processing chromosome " + chromosome)
-    print("Finished processing chromosome " + chromosome)
+        print('Error occured while processing chromosome ' + chromosome)
+    print('Finished processing chromosome ' + chromosome)
 
-x = list(map(depthCounter, [str(chromosome) for chromosome in range(1,23)] + ["X","Y"]))
-system("mv temp results")
-system("zip rename_me.zip results/*")
-system("rm -rf results")
+x = list(map(depthCounter, [str(chromosome) for chromosome in range(1,23)] + ["X"]))
 
-
+shutil.make_archive('rename_me.zip', 'zip', 'temp')
+shutil.rmtree('temp', ignore_errors=True)
+input('Done, press the enter key to exit')

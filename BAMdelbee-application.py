@@ -5,24 +5,20 @@
 
 
 import pandas as pd
-#import lxml, html5lib
+
 import dash
 from dash.dependencies import Input, Output
-import dash_core_components as dcc
-import dash_html_components as html
-import dash_table
+from dash import dcc, html, dash_table
 
 from zipfile import ZipFile
 from glob import glob
-
-from time import sleep
+import urllib
 
 
 # In[ ]:
 
 
-batches = glob("Batches/*.zip")
-availableBatches = [batch for batch in batches]
+batches = glob("assets/*.zip")
 
 omim_map = pd.read_csv('assets/OMIM_map.txt', sep = '\t')
 
@@ -32,9 +28,11 @@ MGI_IDs = dict(zip(MGI_IDs['Symbol'], MGI_IDs['MGI_ID']))
 hpo = pd.read_csv('assets/HPO_dict.txt', sep = '\t')
 hpo = hpo[hpo['Associated Genes'].str.len() > 1]
 
-refSeqSummaries = pd.read_csv('assets/RefSeqSummaries.tsv', sep = '\t', dtype = str)
+refSeqSummaries = pd.read_csv('assets/RefSeqSummaries.tsv', sep = '\t', dtype = str, low_memory = False)
 
 default_style = {'width' : '57%', 'height' : '100%', 'margin' : '10px', 'font-family' : 'gisha', 'marginLeft' : 'auto', 'marginRight' : 'auto', 'textAlign' : 'center'}
+default_style = {'width' : '100%', 'height' : '100%', 'margin' : '10px', 'font-family' : 'gisha', 'marginLeft' : 'auto', 'marginRight' : 'auto', 'textAlign' : 'center'}
+
 hide = {'display' : 'None'}
 full_display = {'width' : '100%', 'height' : '100%', 'margin' : '10px', 'font-family' : 'gisha', 'textAlign' : 'center'}
 info_style = {'width' : '100%', 'height' : '100%', 'margin' : '10px', 'font-family' : 'gisha', 'marginLeft' : 'auto', 'marginRight' : 'auto', 'textAlign' : 'left'}
@@ -45,81 +43,53 @@ break_line = html.Hr(style={'height' : '4px', 'width' : '60%', 'color' : '#11111
 
 
 def generateHeatTable(gene, Chromosome, Position):
-    sleep(2)
-    children = []
-    try:
-        url = 'https://www.ncbi.nlm.nih.gov/clinvar?term=(' + gene + '%5BGene%20Name%5D)%20AND%20pathogenic'
-        df = pd.read_html(url)[0]
-        if df.shape[0] > 100:
-            children.append(html.P('Too many pathogenic variants for this gene!😵'))
-        elif df.shape[0] == 0:
-            children.append(html.P('Could not find pathogenic variants for this gene in ClinVar🤷 🤷‍♂️'))
-        else:
-            del df['VariationLocation']
-            del df['Gene(s)']
-            del df['Clinical significance (Last reviewed)']
-            del df['Review status']
-            del df['Protein change']
-            df.fillna('', inplace = True)
-            def getGRCh38(value):
-                try:
-                    location = value.split('GRCh38: Chr')[1]
-                    if '-' in location:
-                        location = location.split('-')[0]
-                    return location
-                except:
-                    return 'delete'
-            def getVariation(value):
-                try:
-                    variant = value.replace('GRCh38/hg38 ','').split('GRC')[0]
-                    return variant
-                except:
-                    return 'delete'
-            df['Coordinates'] = df['VariationLocation.1'].apply(getGRCh38)
-            df['Variation'] = df['VariationLocation.1'].apply(getVariation)
-            del df['VariationLocation.1']
-            df = df[df['Coordinates'] != 'delete']
-            df = df[df['Variation'] != 'delete']
-            df['Condition(s)'] = df['Condition(s)'].str.replace('See cases', 'Check link ➜')
-            df['Position'] = df['Coordinates'].str.split(':').str[1]
-            df['Position'] = df['Position'].astype(int)
-            coordinates = str(Chromosome) + ':' + str(Position)
-            if coordinates in df['Coordinates']:
-                False
-            else:
-                df = df.append({
-                    'Coordinates' : coordinates,
-                    'Position' : int(Position),
-                    'Condition(s)' : '👨‍🔬👩‍🔬',
-                    'Accession' : 'Your variant',
-                    'Variation' : '👩‍⚕️ 👨‍⚕️'
-                },
-            ignore_index=True)
-            df.sort_values('Position', inplace = True)
-            if df['Position'].max() - int(Position) >= int(Position) - df['Position'].min():
-                maxSpace = df['Position'].max() - int(Position)
-            else:
-                maxSpace = int(Position) - df['Position'].min()
-            df['gradient'] = (1 - abs(int(Position) - df['Position']) / maxSpace) * 255 ** 0.7
-            df['gradient'] = df['gradient'].astype(int)
-            df.at[df.index[df['Coordinates'] == coordinates].tolist(), 'gradient'] = 255
-            df['gradient'] = df['gradient'].apply(lambda x : 'rgb(255,' + str(255 - x) + ',' + str(255 - x)+')')
-            del df['Position']
-            df = df[['Coordinates','Condition(s)','Accession','Variation', 'gradient']]
-            cols = ('Coordinates','Condition(s)','Accession','Variation')
-            df['link'] = 'https://www.ncbi.nlm.nih.gov/clinvar/variation/' + df['Accession']
-            print(df)
-            children.append(html.Table(
-                [html.Tr([html.Th(col) for col in cols], style = {'textAlign' : 'center', 'border': '1px solid black', 'border-collapse' : 'collapse'})] +
-                [html.Tr([
-                    html.Td(df.iloc[i][col], style = {'backgroundColor' : df.iloc[i]['gradient'], 'textAlign' : 'center', 'border': '1px solid black', 'border-collapse' : 'collapse'}) if col != 'Accession' else html.Td(html.A(href=df.iloc[i]['link'], children=df.iloc[i][col], target='_blank'), style = {'backgroundColor' : df.iloc[i]['gradient'], 'textAlign' : 'center', 'border': '1px solid black', 'border-collapse' : 'collapse'}) for col in cols
-                ]) for i in range(len(df))],
-                style = {'textAlign' : 'center', 'border': '1px solid black', 'border-collapse' : 'collapse'}
-            )
-        )
-    except:
-        children.append(html.P('Could not find pathogenic variants for this gene in ClinVar🤷 🤷‍♂️'))
-    return children
+    df = pd.read_csv('assets/CleanerVar.tsv', sep = '\t', low_memory = False) 
+    df = df[df['Gene'] == gene]
+    if df.shape[0] == 0:
+        return html.P('Could not find pathogenic variants for this gene in ClinVar🤷 🤷‍♂️')
+    del df['Gene']
+    del df['Chromosome']
+    df.fillna('', inplace = True)
+    df['Reference'] = df['Reference'].astype(str).str.replace('na','')
+    df['Variant'] = df['Variant'].astype(str).str.replace('na','')
+    df['Variation'] = df.apply(lambda x : x['Reference'] + '>' + x['Variant'], axis = 1)
+    del df['Reference']
+    del df['Variant']
+    df['Variation'] = df.apply(lambda x : x['Mutation Type'] if x['Variation'] == '>' else x['Variation'], axis = 1)
+    del df['Mutation Type']
+    df['VariationID'] = df['VariationID'].apply(lambda x : str(int(x)))
+    df['Link'] = 'https://www.ncbi.nlm.nih.gov/clinvar/variation/' + df['VariationID']
+    del df['VariationID']
+    df = df.append({
+        'Significance' : '👩‍⚕️👨‍⚕️',
+        'Phenotypes' : '👩‍⚕️👨‍⚕️',
+        'Position' : int(Position),
+        'Variation' : 'Your variant',
+        'Link' : ''
+    }, ignore_index=True)
+    df.sort_values('Position', inplace = True)
+    if df['Position'].max() - int(Position) >= int(Position) - df['Position'].min():
+        maxSpace = df['Position'].max() - int(Position)
+    else:
+        maxSpace = int(Position) - df['Position'].min()
+    df['gradient'] = (1 - abs(int(Position) - df['Position']) / maxSpace) * 255 ** 0.7
+    df['gradient'] = df['gradient'].astype(int)
+    df.at[df.index[df['Position'] == Position].tolist(), 'gradient'] = 255
+    df['gradient'] = df['gradient'].apply(lambda x : 'rgb(255,' + str(255 - x) + ',' + str(255 - x)+')')
+    df['Position'] = df['Position'].apply(lambda x : str(Chromosome) + ':' + str(x))
+    cols = ('Position', 'Phenotypes', 'Variation', 'Link')
+    df['Variation'] = df['Variation'].apply(lambda x : x[:25] + '(...)' if len(x) > 25 else x)
+    return html.Table(
+        [html.Tr([html.Th(col) for col in cols], style = {'textAlign' : 'center', 'border': '1px solid black', 'border-collapse' : 'collapse'})] +
+        [html.Tr([
+            html.Td(df.iloc[i][col], style = {'backgroundColor' : df.iloc[i]['gradient'], 'textAlign' : 'center', 'border': '1px solid black', 'border-collapse' : 'collapse'}) if col != 'Link' else html.Td(html.A(href=df.iloc[i]['Link'], children=df.iloc[i][col], target='_blank'), style = {'backgroundColor' : df.iloc[i]['gradient'], 'textAlign' : 'center', 'border': '1px solid black', 'border-collapse' : 'collapse'}) for col in cols
+        ]) for i in range(len(df))],
+        style = {'textAlign' : 'center', 'border': '1px solid black', 'border-collapse' : 'collapse'}
+    )
+
+def sortBatches(batches):
+    options = [{'label': v[7:-4], 'value': v} for v in sorted(batches)]
+    return options
 
 
 # In[ ]:
@@ -137,48 +107,62 @@ app.config['suppress_callback_exceptions'] = False
 app.layout = html.Div([
     html.Div([
         html.Img(id = 'header_image',
-            src = 'assets/logo_birklab.png',
+            src = 'assets/logo_BAMdelbee.png',
             style = {
-                'height' : '25%',
-                'width' : '25%',
-                'float' : 'left'
+                'height' : '16%',
+                'width' : '16%',
+                'float' : 'left',
+                'marginLeft' : 4
             }
         ),
         html.Span(''),
         html.Img(id = 'header_image2',
-            src = 'assets/logo_BAMdelbee.png',
+            src = 'assets/logo_birklab.png',
             style = {
-                'height' : '20%',
-                'width' : '20%',
+                'height' : '16%',
+                'width' : '16%',
                 'float' : 'right',
-                'marginLeft' : 4
+                'margin' : 4
             }
         ),
     ]),
-    html.Span(),
+    html.P(html.Br()),
     html.H2(
-        'Select a batch',
-        id = 'instructions',
-        style = {'width' : '100%', 'height' : '100%', 'font-family' : 'gisha', 'marginLeft' : 'auto', 'marginRight' : 'auto', 'textAlign' : 'center'}
-
+        '',
+        id = 'selected_batch',
+        style = {'width' : '100%', 'height' : '100%', 'font-family' : 'gisha', 'margin' : 'auto', 'textAlign' : 'center'}
     ),
-    dcc.Dropdown(
-        id = 'BatchesDropdown',
-        options = [{'label': v[8:-4], 'value': v} for v in batches],
-        multi = False,
-        placeholder = 'Select batch',
-        style = default_style
+    html.P(
+        'Select sample/s:',
+        id = 'selected_samples',
+        style = {'display' : 'none'}
     ),
-    dcc.RadioItems(
-        id = 'referenceRadioButtons',
-        options=[
-            {'label': 'hg38', 'value': 'hg38'},
-            {'label': 'hg19', 'value': 'hg19'},
+    html.Div([
+        dcc.Dropdown(
+            id = 'BatchesDropdown',
+            options = sortBatches(batches),
+            multi = False,
+            placeholder = 'Select a batch',
+            style = {'width' : '70%', 'height' : '100%', 'font-family' : 'gisha', 'margin' : 'auto', 'textAlign' : 'center'}
+        ),
+        html.Br(id = 'spacer1'),
+        dcc.RadioItems(
+            id = 'referenceRadioButtons',
+            options=[
+                {'label': 'hg38', 'value': 'hg38'},
+                {'label': 'hg19', 'value': 'hg19'},
+            ],
+            value='hg38',
+            labelStyle={'display': 'inline-block'},
+            style = {'width' : '100%', 'height' : '100%', 'font-family' : 'gisha', 'margin' : 'auto', 'textAlign' : 'center'}
+        ),
         ],
-        value='hg38',
-        labelStyle={'display': 'inline-block'},
-        style = default_style
+        style = {'width' : '100%', 'height' : '100%', 'font-family' : 'gisha', 'margin' : 'auto', 'textAlign' : 'center'}
     ),
+    
+    
+    html.P(html.Br(), id = 'temp_break'),
+    
     html.Div([
         html.Div([
             html.Div(id = 'checkListContainer'),
@@ -221,20 +205,27 @@ app.layout = html.Div([
     [Output('BatchesDropdown', 'style'),
      Output('referenceRadioButtons', 'style'),
      Output('checklist_div', 'style'),
-     Output('instructions', 'children'),
-     Output('checkListContainer', 'children')],
+     Output('selected_batch', 'children'),
+     Output('checkListContainer', 'children'),
+     Output('temp_break', 'style'),
+     Output('selected_samples', 'style'),
+     Output('spacer1', 'style')],
     [Input('BatchesDropdown', 'value')]
 )
 def chooseBatch(batch):
     if batch != None:
         zBatch = ZipFile(batch)
-        samples = zBatch.read('results/samples.txt').decode('utf-8', 'ignore').split('\n')
+        samples = zBatch.read('samples.txt').decode('utf-8', 'ignore').split('\n')
+        samples = sorted(samples)
         samples = [{'label' : str(sample), 'value' : str(sample)} for sample in samples]
         checkList = dcc.Checklist(id = 'samplesCheckList', options = samples, labelStyle={'display': 'block'}) 
         btn = html.Button('Analyze', id = 'Analysis_starting_button', disabled = True, n_clicks = 0, style = {'text-transform' : 'none', 'font-size' : '30px'})
-        return [hide, hide, default_style, batch[8:-4], [checkList, btn]]
+        checklist_style = {'width' : '100%', 'height' : '100%', 'font-family' : 'gisha', 'marginLeft' : 'auto', 'marginRight' : 'auto', 'textAlign' : 'center'}
+        return [hide, hide, checklist_style, batch[7:-4], [checkList, btn], {'display' : 'none'}, default_style, {'display' : 'none'}]
     else:
-        return [default_style, default_style, hide, "Select batch:", None]
+        dropdown_style = {'width' : '70%', 'height' : '100%', 'font-family' : 'gisha', 'marginLeft' : 'auto', 'marginRight' : 'auto', 'textAlign' : 'center'}
+        ref_style = {'width' : '100%', 'height' : '100%', 'font-family' : 'gisha', 'marginLeft' : 'auto', 'marginRight' : 'auto', 'textAlign' : 'center'}
+        return [dropdown_style, ref_style, hide, '', None, default_style, {'display' : 'none'}, {'display' : 'inline-block'}]
 
 @app.callback(
     [Output('Analysis_starting_button', 'disabled')],
@@ -250,7 +241,8 @@ def chooseSamples(samples):
     [Output('parameters_div', 'style'),
      Output('table_div', 'style'),
      Output('table_div', 'children'),
-     Output('loading_results_div', 'children')],
+     Output('loading_results_div', 'children'),
+     Output('selected_samples', 'children')],
     [Input('Analysis_starting_button', 'n_clicks'),
      Input('BatchesDropdown', 'value'),
      Input('samplesCheckList', 'value'),
@@ -258,22 +250,25 @@ def chooseSamples(samples):
 )
 def update_figure(clicks, batch, affected, referenceGenome):
     if clicks in (0, None):
-        return [default_style, hide, [], None]
+        return [default_style, hide, [], None, 'Select sample\s:']
     else:
         if referenceGenome == 'hg38':
-            geneMap = pd.read_csv('assets/NCBI_Genes_hg38.map')
+            geneMap = pd.read_csv('assets/NCBI_Genes_hg38.map', low_memory = False)
         else:
-            geneMap = pd.read_csv('assets/NCBI_Genes_hg19.map')
+            geneMap = pd.read_csv('assets/NCBI_Genes_hg19.map', low_memory = False)
         geneMap['Chr'] = geneMap['Chr'].astype(str)
         
         zBatch = ZipFile(batch)
         deletions = []
         sizes = []
         genes = []
+        isCoding = []
+        exons = pd.read_csv('assets/' + referenceGenome + '_exons.csv.gz', low_memory = False)
+        exons['Chromosome'] = exons['Chromosome'].astype(str)
         
         for chromosome in [str(c) for c in range(1,23)] + ['X', 'Y']:
             try:
-                df = pd.read_csv(zBatch.open('results/chr' + chromosome + '.coverage'), sep = '\t')
+                df = pd.read_csv(zBatch.open('chr' + chromosome + '.coverage'), sep = '\t', low_memory = False)
             except:
                 continue
             samples = df.columns[1:]
@@ -297,6 +292,13 @@ def update_figure(clicks, batch, affected, referenceGenome):
                         sizes.append(end-start)
                         genes_in_deletion = geneMap[(geneMap['Chr'] == chromosome) & (geneMap['Start'] <= start) & (geneMap['End'] >= end)]['Gene'].tolist()
                         genes.append(', '.join(genes_in_deletion))
+                        coding = exons[exons['Gene'].isin(genes_in_deletion)]
+                        coding = coding[coding['Chromosome'] == chromosome]
+                        coding = coding[(coding['Start'] >= start) & (coding['Start'] <= end)]
+                        if coding.empty:
+                            isCoding.append('')
+                        else:
+                            isCoding.append('Yes')
         df = pd.DataFrame()
         df['Coordinates'] = deletions
         df['Chromosome'] = df['Coordinates'].apply(lambda x : int(x.split(':')[0].upper().replace('X', '23').replace('Y', '24').replace('M', '25').replace('MT', '25')))
@@ -306,16 +308,22 @@ def update_figure(clicks, batch, affected, referenceGenome):
         df.sort_values(['Chromosome', 'Start'], inplace = True)
         df.reset_index(drop = True, inplace = True)
         df['End'] = df['Coordinates'].apply(lambda x : int(x.split(':')[1].split('-')[1]))
+        df['Coding'] = isCoding
         del df['Chromosome']
         del df['Start']
         del df['End']
         df = df[df['~Size (bp)'] > 50]
-
+        df = df[df['Genes'] != '']
+        
+        if df.empty:
+            return [hide, full_display, [html.H2('🤷 No deletion were found 🤷‍♂️')], None, ', '.join(affected)]
+        
         ddt = dash_table.DataTable(
             id = 'table',
             data = df.to_dict('records'),
             columns = [{'id': c, 'name': c} for c in df.columns],
-            page_action = 'none',
+            page_action = 'naive',
+            page_size = 25,
             row_selectable='single',
             fixed_rows={'headers' : True},
             style_cell = {
@@ -353,8 +361,11 @@ def update_figure(clicks, batch, affected, referenceGenome):
             },
             style_as_list_view = False
         )
+        csv_report = df.fillna('').to_csv(na_rep = '', index = False).replace(',nan,', ',,').replace('[','').replace(']','').replace("'",'')
+        download_href = "data:text/csv;charset=utf-8," + urllib.parse.quote(csv_report)
+        download_image = html.A('Download table ⬇️', href = download_href, download = 'BAMdelbee_' + '_'.join(affected) + '.csv', title = 'Download table', style = {'text-decoration' : 'none', 'fontSize' : '150%', 'float' : 'right', 'marginTop' : 1})
         info = html.Div('Click on a deletion for more information', id = 'info')
-        return [hide, full_display, [ddt, info], None]
+        return [hide, full_display, [ddt, download_image, info], None, ', '.join(affected)]
 
 @app.callback(
     [Output('info', 'children'),
@@ -371,7 +382,7 @@ def getVariantData(selected_row_index, data, referenceGenome):
         coordinates = data[selected_row_index[0]]['Coordinates']
         genes = data[selected_row_index[0]]['Genes']
         
-        #IGV & UCSC & gnomAD 
+        #IGV & UCSC % gnomAD
         igv_link = 'http://localhost:60151/goto?locus=chr' + coordinates
         igvA = html.A('IGV', href = igv_link, target = '_blank')
         ucsc_link = 'https://genome.ucsc.edu/cgi-bin/hgTracks?db=' + referenceGenome + '&position=' + coordinates.replace(':','%3A')
@@ -400,8 +411,13 @@ def getVariantData(selected_row_index, data, referenceGenome):
             hpo_terms = hpo[hpo['Associated Genes'].str.contains('|'.join(genes.split(', ')))]['HPO'].tolist()
             phenotypes = ', '.join(hpo_terms)
             if len(phenotypes.strip()) > 0:
-                elements.append(html.Div('HPO associated phenotypes:', style = {'fontStyle' : 'oblique'}))
-                elements.append(html.Div(phenotypes))
+                hpos = html.Details(
+                    [
+                    html.Summary('HPO associated phenotypes', style = {'fontStyle' : 'oblique'}),
+                    html.Div(html.Div(phenotypes))
+                    ],
+                )
+                elements.append(hpos)
                 elements.append(break_line)
         
             #GeneCards
@@ -450,8 +466,8 @@ def getVariantData(selected_row_index, data, referenceGenome):
         #ClinVar HeatTable
         if len(genes) > 0:
             elements.append(html.Div(break_line))
-            clinVarBtn = btn = html.Button('ClinVar HeatTable', id = 'HeatTableBtn', n_clicks = 0, style = {'text-transform' : 'none'})
-            heatTableDiv = html.Div(id = 'heatTableDiv')
+            clinVarBtn = html.Button('ClinVar HeatTable', id = 'HeatTableBtn', n_clicks = 0, style = {'text-transform' : 'none'})
+            heatTableDiv = html.Div(id = 'heatTableDiv', style = {'display' : 'inline-block', 'margin':'auto'})
             elements.append(clinVarBtn)
             elements.append(heatTableDiv)
         
@@ -467,7 +483,7 @@ def getVariantData(selected_row_index, data, referenceGenome):
 )
 def update_figure(clicks, selected_row_index, data):
     if clicks in [0, None]:
-        return [[None], None]
+        return [[None], None, {'display' : 'inline-block', 'text-transform' : 'none'}]
     else:
         coordinates = data[selected_row_index[0]]['Coordinates']
         gene = data[selected_row_index[0]]['Genes']
@@ -481,6 +497,6 @@ def update_figure(clicks, selected_row_index, data):
 
 if __name__ == '__main__':
     import webbrowser
-    webbrowser.open('http://127.0.0.1:6161/')
-    app.run_server(port=6161)
+    webbrowser.open('http://127.0.0.1:6261/')
+    app.run_server(port=6261)
 
