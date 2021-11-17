@@ -7,5 +7,5 @@ The application is freely available for research porpuses and can run on a commo
 The application is developed by Noam Hadar, a MD PhD student under the guidance of Prof. Ohad Birk, at the The Morris Kahn Laboratory of Human Genetics.
 We use BAMdelbee in every recessive disease study including WES and WGS and recommand doing so to address the blind spot that is not investigated using CMA and VCF files.
 
-#Installation and user guide are available in the file "BAMdelbee-Instructions" and at this link: https://lifewp.bgu.ac.il/wp/obirk/bamdelbee
+#Installation and user guide are available in the file "BAMdelbee-Instructions" and at:<br><a href="http://birklab.bgu.ac.il/BAMdelbee">birklab.bgu.ac.il/BAMdelbee</a>
 
