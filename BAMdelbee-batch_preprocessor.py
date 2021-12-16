@@ -66,6 +66,6 @@ def depthCounter(chromosome):
 
 x = list(map(depthCounter, [str(chromosome) for chromosome in range(1,23)] + ["X"]))
 
-shutil.make_archive('rename_me.zip', 'zip', 'temp')
+shutil.make_archive('rename_me', 'zip', 'temp')
 shutil.rmtree('temp', ignore_errors=True)
 input('Done, press the enter key to exit')
