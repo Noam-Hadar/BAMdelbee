@@ -3,6 +3,11 @@ import os
 import pandas as pd
 import subprocess
 import shutil
+from time import sleep
+
+print('Please ignore messages such as "samtools view: writing to standard output failed: Broken pipe" or "samtools view: error closing standard output: -1", they do not affect the analysis.')
+sleep(1)
+print('\n')
 
 try:
     os.mkdir('temp')
@@ -11,8 +16,6 @@ except:
 bams = glob('**/*.bam', recursive = True)
 print('Located BAM files:\n' + '\n'.join(bams) + '\n')
 
-samples = [bam[:-4] for bam in bams]
-open('temp/samples.txt', 'w').write('\n'.join(samples))
 
 def getSampleName(name):
     sample = name[:-4]
@@ -21,6 +24,9 @@ def getSampleName(name):
     if '\\' in sample:
         sample = sample.split('\\')[-1]
     return sample
+
+samples = [getSampleName(bam) for bam in bams]
+open('temp/samples.txt', 'w').write('\n'.join(samples))
 
 def depthCounter(chromosome):
     print('Processing chromosome ' + chromosome + '...')
@@ -36,16 +42,16 @@ def depthCounter(chromosome):
                     command = 'samtools depth -a -r chr' + chromosome + ' ' + bam + " | cut -f2,3 | awk '$1%50==0' | head -n -1 | sort -n -s -k1,1 > temp/" + sample + '_chr' + chromosome + '.counted'
                 else:
                     command = 'samtools depth -a -r ' + chromosome + ' ' + bam + " | cut -f2,3 | awk '$1%50==0' | head -n -1 | sort -n -s -k1,1 > temp/" + sample + '_chr' + chromosome + '.counted'
-                subprocess.check_call(['wsl'] + command.split(' '))
+                subprocess.call(['wsl'] + command.split(' '), stderr = subprocess.STDOUT)
             else:
                 os.system(chrAnnotation + ' > temp.txt')
                 head = open('temp.txt', 'r').read()
                 os.remove('temp.txt')
-                if 'chr' in str(head).lower():
+                if 'chr' in str(head).lower():       
                     command = 'samtools depth -a -r chr' + chromosome + ' ' + bam + " | cut -f2,3 | awk '$1%50==0' | head -n -1 | sort -n -s -k1,1 > temp/" + sample + '_chr' + chromosome + '.counted'
                 else:
                     command = 'samtools depth -a -r ' + chromosome + ' ' + bam + " | cut -f2,3 | awk '$1%50==0' | head -n -1 | sort -n -s -k1,1 > temp/" + sample + '_chr' + chromosome + '.counted'
-                os.system(command)
+                subprocess.run(command, shell = True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
             sample = getSampleName(bams[0])
             df = pd.read_csv('temp/' + sample + '_chr' + chromosome + '.counted', sep = '\t', header = None)
         df.columns = ['Coordinate', sample ]
